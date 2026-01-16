@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Jira Ticket Copy</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Jira Ticket Copy</h1>
+    </header>
+
+    <main id="main-content">
+      <!-- Not configured state -->
+      <div id="not-configured" class="state-view" style="display: none;">
+        <div class="message info">
+          <p>Please configure the extension to get started.</p>
+        </div>
+        <button id="open-config-btn" class="btn btn-primary">Configure Extension</button>
+      </div>
+
+      <!-- Not on Jira page state -->
+      <div id="not-jira-page" class="state-view" style="display: none;">
+        <div class="message info">
+          <p>Open a Jira ticket page to copy tickets.</p>
+        </div>
+      </div>
+
+      <!-- Loading state -->
+      <div id="loading" class="state-view" style="display: none;">
+        <div class="spinner"></div>
+        <p>Loading ticket...</p>
+      </div>
+
+      <!-- Ticket loaded state -->
+      <div id="ticket-view" class="state-view" style="display: none;">
+        <div class="ticket-info">
+          <div class="ticket-header">
+            <span id="ticket-key" class="ticket-key"></span>
+            <a id="ticket-link" href="#" target="_blank" class="ticket-link">View Original</a>
+          </div>
+          <h2 id="ticket-summary" class="ticket-summary"></h2>
+          <div id="ticket-description" class="ticket-description"></div>
+        </div>
+        <button id="copy-btn" class="btn btn-primary">Copy to Jira</button>
+      </div>
+
+      <!-- Copying state -->
+      <div id="copying" class="state-view" style="display: none;">
+        <div class="spinner"></div>
+        <p>Creating ticket...</p>
+      </div>
+
+      <!-- Success state -->
+      <div id="success" class="state-view" style="display: none;">
+        <div class="message success">
+          <p>Ticket copied successfully!</p>
+        </div>
+        <div class="new-ticket-info">
+          <a id="new-ticket-link" href="#" target="_blank" class="btn btn-primary">Open New Ticket</a>
+        </div>
+        <button id="copy-another-btn" class="btn btn-secondary">Copy Another</button>
+      </div>
+
+      <!-- Error state -->
+      <div id="error" class="state-view" style="display: none;">
+        <div class="message error">
+          <p id="error-message"></p>
+        </div>
+        <button id="retry-btn" class="btn btn-primary">Try Again</button>
+        <button id="error-config-btn" class="btn btn-secondary">Check Configuration</button>
+      </div>
+    </main>
+
+    <footer>
+      <button id="footer-config-btn" class="btn-link">Settings</button>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

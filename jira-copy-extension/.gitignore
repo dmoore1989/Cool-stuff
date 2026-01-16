@@ -1,0 +1,31 @@
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Editor Files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+
+# Temporary Files
+*.tmp
+temp/
+
+# Archive Files
+*.zip
+*.tar.gz
+
+# Node modules (if you add build tools later)
+node_modules/
+
+# Environment files (if you add any)
+.env
+.env.local
+
+# Generated icons (if using build process)
+generated-icons/
