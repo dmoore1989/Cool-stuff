@@ -88,14 +88,15 @@ async function fetchTicket(baseUrl, ticketKey) {
 /**
  * Copy ticket to destination Jira
  */
-async function copyTicket(sourceTicketKey, summary, description, sourceTicketUrl) {
+async function copyTicket(sourceTicketKey, summary, description, sourceTicketUrl, issueType) {
   return new Promise((resolve) => {
     chrome.runtime.sendMessage({
       action: 'copyTicket',
       sourceTicketKey: sourceTicketKey,
       summary: summary,
       description: description,
-      sourceTicketUrl: sourceTicketUrl
+      sourceTicketUrl: sourceTicketUrl,
+      issueType: issueType
     }, (response) => {
       resolve(response);
     });
@@ -194,7 +195,8 @@ async function handleCopyClick() {
     currentState.ticketData.key,
     currentState.ticketData.summary,
     currentState.ticketData.description,
-    currentState.ticketData.url
+    currentState.ticketData.url,
+    currentState.ticketData.issueType
   );
 
   if (!result.success) {

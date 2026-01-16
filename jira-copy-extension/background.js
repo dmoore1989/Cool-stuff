@@ -51,11 +51,42 @@ async function fetchTicket(baseUrl, ticketKey, email, apiToken) {
 }
 
 /**
+ * Extract plain text from ADF structure
+ */
+function extractTextFromADF(adf) {
+  if (!adf || typeof adf === 'string') {
+    return adf || '';
+  }
+
+  let text = '';
+
+  function traverse(node) {
+    if (node.type === 'text') {
+      text += node.text;
+    } else if (node.type === 'hardBreak') {
+      text += '\n';
+    } else if (node.type === 'paragraph' && text.length > 0) {
+      text += '\n\n';
+    }
+
+    if (node.content && Array.isArray(node.content)) {
+      node.content.forEach(traverse);
+    }
+  }
+
+  traverse(adf);
+  return text.trim();
+}
+
+/**
  * Create ticket on destination Jira
  */
-async function createTicket(baseUrl, projectKey, summary, description, sourceTicketUrl, email, apiToken) {
+async function createTicket(baseUrl, projectKey, summary, description, sourceTicketUrl, issueType, email, apiToken) {
   try {
-    // Format description with link to original ticket
+    // Extract plain text from description (safer than trying to preserve ADF)
+    const plainTextDescription = extractTextFromADF(description);
+
+    // Build a simple, valid ADF structure
     const fullDescription = {
       type: 'doc',
       version: 1,
@@ -80,32 +111,68 @@ async function createTicket(baseUrl, projectKey, summary, description, sourceTic
               ]
             }
           ]
-        },
-        {
-          type: 'paragraph',
-          content: []
         }
       ]
     };
 
-    // Add original description if it exists
-    if (description) {
-      // If description is a string, convert to Atlassian Document Format
-      if (typeof description === 'string') {
-        fullDescription.content.push({
-          type: 'paragraph',
-          content: [
-            {
-              type: 'text',
-              text: description
+    // Add separator
+    fullDescription.content.push({
+      type: 'rule'
+    });
+
+    // Add the description content as plain text paragraphs
+    if (plainTextDescription) {
+      // Split by double newlines to preserve paragraph structure
+      const paragraphs = plainTextDescription.split(/\n\n+/);
+
+      paragraphs.forEach(para => {
+        const trimmedPara = para.trim();
+        if (trimmedPara) {
+          // Split single newlines within a paragraph
+          const lines = trimmedPara.split('\n');
+          const paragraphContent = [];
+
+          lines.forEach((line, index) => {
+            if (line.trim()) {
+              paragraphContent.push({
+                type: 'text',
+                text: line
+              });
+
+              // Add hard break between lines (except last line)
+              if (index < lines.length - 1) {
+                paragraphContent.push({
+                  type: 'hardBreak'
+                });
+              }
             }
-          ]
-        });
-      } else {
-        // If it's already in ADF format, append it
-        fullDescription.content = fullDescription.content.concat(description.content || []);
-      }
+          });
+
+          if (paragraphContent.length > 0) {
+            fullDescription.content.push({
+              type: 'paragraph',
+              content: paragraphContent
+            });
+          }
+        }
+      });
     }
+
+    const payload = {
+      fields: {
+        project: {
+          key: projectKey
+        },
+        summary: summary,
+        description: fullDescription,
+        issuetype: {
+          name: issueType || 'Task'
+        }
+      }
+    };
+
+    // Log the payload for debugging
+    console.log('Creating ticket with payload:', JSON.stringify(payload, null, 2));
 
     const url = `${baseUrl}/rest/api/3/issue`;
     const response = await fetch(url, {
@@ -115,22 +182,13 @@ async function createTicket(baseUrl, projectKey, summary, description, sourceTic
         'Content-Type': 'application/json',
         'Accept': 'application/json'
       },
-      body: JSON.stringify({
-        fields: {
-          project: {
-            key: projectKey
-          },
-          summary: summary,
-          description: fullDescription,
-          issuetype: {
-            name: 'Task'
-          }
-        }
-      })
+      body: JSON.stringify(payload)
     });
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
+      console.error('Failed to create ticket:', errorData);
+      console.error('Payload that failed:', JSON.stringify(payload, null, 2));
       throw new Error(`Failed to create ticket: ${response.status} ${response.statusText}. ${JSON.stringify(errorData)}`);
     }
 
@@ -153,11 +211,32 @@ async function createTicket(baseUrl, projectKey, summary, description, sourceTic
 }
 
 /**
- * Create issue link between source and destination tickets
+ * Create remote link between tickets across JIRA instances
+ * Note: JIRA's native issue link API only works within the same instance.
+ * For cross-instance linking, we must use remote links (web links).
  */
-async function createIssueLink(baseUrl, sourceTicketKey, destTicketKey, email, apiToken) {
+async function createRemoteLink(baseUrl, sourceTicketKey, destTicketUrl, destTicketKey, email, apiToken) {
+  console.log('=== Creating Remote Link ===');
+  console.log('Source JIRA URL:', baseUrl);
+  console.log('Source ticket key:', sourceTicketKey);
+  console.log('Destination ticket URL:', destTicketUrl);
+  console.log('Destination ticket key:', destTicketKey);
+
   try {
-    const url = `${baseUrl}/rest/api/3/issueLink`;
+    const payload = {
+      object: {
+        url: destTicketUrl,
+        title: `Copied to ${destTicketKey}`,
+        icon: {
+          url16x16: 'https://www.atlassian.com/favicon.ico',
+          title: 'Jira'
+        }
+      }
+    };
+
+    console.log('Remote link payload:', JSON.stringify(payload, null, 2));
+
+    const url = `${baseUrl}/rest/api/3/issue/${sourceTicketKey}/remotelink`;
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -165,29 +244,25 @@ async function createIssueLink(baseUrl, sourceTicketKey, destTicketKey, email, a
         'Content-Type': 'application/json',
         'Accept': 'application/json'
       },
-      body: JSON.stringify({
-        type: {
-          name: 'Relates'
-        },
-        inwardIssue: {
-          key: sourceTicketKey
-        },
-        outwardIssue: {
-          key: destTicketKey
-        }
-      })
+      body: JSON.stringify(payload)
     });
+
+    console.log('Remote link response status:', response.status, response.statusText);
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      console.warn('Failed to create issue link:', response.status, errorData);
+      console.error('❌ Failed to create remote link:', errorData);
+      console.error('Error details:', JSON.stringify(errorData, null, 2));
       // Don't fail the whole operation if link creation fails
-      return { success: false, error: 'Link creation failed but ticket was created' };
+      return { success: false, error: `Remote link creation failed: ${response.status} - ${JSON.stringify(errorData)}` };
     }
 
+    const responseData = await response.json().catch(() => ({}));
+    console.log('✅ Remote link created successfully:', responseData);
     return { success: true };
   } catch (error) {
-    console.error('Error creating issue link:', error);
+    console.error('❌ Error creating remote link:', error);
+    console.error('Error stack:', error.stack);
     return { success: false, error: error.message };
   }
 }
@@ -272,6 +347,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.action === 'copyTicket') {
     getConfig().then(async config => {
+      console.log('=== Starting Ticket Copy Operation ===');
+      console.log('Source ticket:', request.sourceTicketKey);
+      console.log('Source URL:', request.sourceTicketUrl);
+
       // Create ticket on destination
       const createResult = await createTicket(
         config.destJiraUrl,
@@ -279,24 +358,59 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         request.summary,
         request.description,
         request.sourceTicketUrl,
+        request.issueType,
         config.destEmail,
         config.destApiToken
       );
 
       if (!createResult.success) {
+        console.error('❌ Ticket creation failed, skipping link creation');
         sendResponse(createResult);
         return;
       }
 
-      // Try to create issue link (optional)
-      await createIssueLink(
-        config.destJiraUrl,
+      console.log('✅ Ticket created successfully:', createResult.ticket.key);
+      console.log('New ticket URL:', createResult.ticket.url);
+
+      // NOTE: We cannot use JIRA's issue link API across instances
+      // (it would fail with "Issue does not exist" error)
+      // Instead, we use remote links (web links) which work cross-instance
+
+      // Create remote link on source JIRA pointing to destination ticket
+      console.log('\n--- Creating remote link on source ticket ---');
+      const sourceRemoteLinkResult = await createRemoteLink(
+        config.sourceJiraUrl,
         request.sourceTicketKey,
+        createResult.ticket.url,
         createResult.ticket.key,
+        config.sourceEmail,
+        config.sourceApiToken
+      );
+
+      if (sourceRemoteLinkResult.success) {
+        console.log('✅ Remote link created on source ticket');
+      } else {
+        console.warn('⚠️ Remote link creation on source failed (non-fatal):', sourceRemoteLinkResult.error);
+      }
+
+      // Create remote link on destination JIRA pointing back to source ticket
+      console.log('\n--- Creating remote link on destination ticket ---');
+      const destRemoteLinkResult = await createRemoteLink(
+        config.destJiraUrl,
+        createResult.ticket.key,
+        request.sourceTicketUrl,
+        request.sourceTicketKey,
         config.destEmail,
         config.destApiToken
       );
 
+      if (destRemoteLinkResult.success) {
+        console.log('✅ Remote link created on destination ticket');
+      } else {
+        console.warn('⚠️ Remote link creation on destination failed (non-fatal):', destRemoteLinkResult.error);
+      }
+
+      console.log('\n=== Ticket Copy Operation Complete ===');
       sendResponse(createResult);
     });
     return true;
