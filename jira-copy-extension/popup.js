@@ -88,15 +88,14 @@ async function fetchTicket(baseUrl, ticketKey) {
 /**
  * Copy ticket to destination Jira
  */
-async function copyTicket(sourceTicketKey, summary, description, sourceTicketUrl, issueType) {
+async function copyTicket(sourceTicketKey, summary, description, sourceTicketUrl) {
   return new Promise((resolve) => {
     chrome.runtime.sendMessage({
       action: 'copyTicket',
       sourceTicketKey: sourceTicketKey,
       summary: summary,
       description: description,
-      sourceTicketUrl: sourceTicketUrl,
-      issueType: issueType
+      sourceTicketUrl: sourceTicketUrl
     }, (response) => {
       resolve(response);
     });
@@ -137,7 +136,6 @@ function extractTextFromADF(adf) {
  */
 function displayTicket(ticket) {
   document.getElementById('ticket-key').textContent = ticket.key;
-  document.getElementById('ticket-type').textContent = ticket.issueType || 'Task';
   document.getElementById('ticket-link').href = ticket.url;
   document.getElementById('ticket-summary').textContent = ticket.summary;
 
@@ -196,8 +194,7 @@ async function handleCopyClick() {
     currentState.ticketData.key,
     currentState.ticketData.summary,
     currentState.ticketData.description,
-    currentState.ticketData.url,
-    currentState.ticketData.issueType
+    currentState.ticketData.url
   );
 
   if (!result.success) {
