@@ -5,9 +5,10 @@ A Chrome extension that copies Jira tickets from one Jira instance to another wi
 ## Features
 
 - 🎯 One-click ticket copying from source to destination Jira
-- 🔗 Automatic issue linking back to original ticket
+- 🔗 Automatic bidirectional linking between original and copied tickets
 - 🔒 Secure API token storage (session-only)
-- 📝 Copies ticket title and description
+- 📝 Copies ticket title, description, and issue type
+- 🏷️ Preserves issue type (Bug, Story, Task, etc.) when possible
 - ✨ Clean, modern UI matching Jira's aesthetic
 
 ## Installation
@@ -80,7 +81,14 @@ You'll need API tokens for both source and destination Jira instances:
 The new ticket will include:
 - The same title as the original
 - The same description as the original
+- The same issue type as the original (Bug, Story, Task, etc.)
 - A link back to the original ticket at the top
+
+The extension also creates bidirectional links:
+- **On the destination ticket**: A "Relates to" issue link to the source ticket
+- **On the source ticket**: A remote link labeled "Copied to [NEW-KEY]" pointing to the new ticket
+
+Note: If the destination project doesn't support the original issue type, the extension will fall back to creating a "Task".
 
 ## Security
 
@@ -102,7 +110,16 @@ The new ticket will include:
 - Verify your destination Jira URL is correct
 - Check that your destination email and API token are valid
 - Verify the project key exists and you have permission to create issues
-- Make sure the destination project uses "Task" as an issue type (or modify the code to use a different type)
+- If you get an error about issue type, the destination project may not support the original issue type. The extension will attempt to use the original type (Bug, Story, etc.) but will fall back to "Task" if the type doesn't exist in the destination project
+
+### Links not appearing
+
+If the ticket copies successfully but links don't appear:
+- Link creation failures are non-blocking - the ticket will still be created
+- Check the browser console (F12) for warnings about link creation
+- Verify you have permission to create links on both Jira instances
+- On the source ticket, look for a "Web Links" section that will show the remote link to the copied ticket
+- On the destination ticket, look for the "Relates to" link in the issue links section
 
 ### Extension icon doesn't appear
 
@@ -145,13 +162,15 @@ jira-copy-extension/
 
 - `GET /rest/api/3/issue/{issueKey}` - Fetch ticket details
 - `POST /rest/api/3/issue` - Create new ticket
-- `POST /rest/api/3/issueLink` - Create issue link
+- `POST /rest/api/3/issueLink` - Create issue link on destination Jira
+- `POST /rest/api/3/issue/{issueKey}/remotelink` - Create remote link on source Jira
 
 ## Limitations
 
-- Only copies title and description (not comments, attachments, or custom fields)
-- Creates tickets as "Task" type (modify code for other types)
-- Issue links may not work if cross-instance linking is disabled
+- Only copies title, description, and issue type (not comments, attachments, or other custom fields)
+- If the destination project doesn't support the original issue type, falls back to "Task"
+- Cross-instance issue links use remote links (web links) rather than native issue links
+- Link creation failures won't prevent ticket creation (links are optional)
 - No batch copying support
 
 ## Future Enhancements

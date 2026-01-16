@@ -53,7 +53,7 @@ async function fetchTicket(baseUrl, ticketKey, email, apiToken) {
 /**
  * Create ticket on destination Jira
  */
-async function createTicket(baseUrl, projectKey, summary, description, sourceTicketUrl, email, apiToken) {
+async function createTicket(baseUrl, projectKey, summary, description, sourceTicketUrl, issueType, email, apiToken) {
   try {
     // Format description with link to original ticket
     const fullDescription = {
@@ -123,7 +123,7 @@ async function createTicket(baseUrl, projectKey, summary, description, sourceTic
           summary: summary,
           description: fullDescription,
           issuetype: {
-            name: 'Task'
+            name: issueType || 'Task'
           }
         }
       })
@@ -153,7 +153,7 @@ async function createTicket(baseUrl, projectKey, summary, description, sourceTic
 }
 
 /**
- * Create issue link between source and destination tickets
+ * Create issue link between source and destination tickets (on destination Jira)
  */
 async function createIssueLink(baseUrl, sourceTicketKey, destTicketKey, email, apiToken) {
   try {
@@ -188,6 +188,45 @@ async function createIssueLink(baseUrl, sourceTicketKey, destTicketKey, email, a
     return { success: true };
   } catch (error) {
     console.error('Error creating issue link:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Create remote link from source ticket to destination ticket (on source Jira)
+ */
+async function createRemoteLink(baseUrl, sourceTicketKey, destTicketUrl, destTicketKey, email, apiToken) {
+  try {
+    const url = `${baseUrl}/rest/api/3/issue/${sourceTicketKey}/remotelink`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': createAuthHeader(email, apiToken),
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({
+        object: {
+          url: destTicketUrl,
+          title: `Copied to ${destTicketKey}`,
+          icon: {
+            url16x16: 'https://www.atlassian.com/favicon.ico',
+            title: 'Jira'
+          }
+        }
+      })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      console.warn('Failed to create remote link:', response.status, errorData);
+      // Don't fail the whole operation if link creation fails
+      return { success: false, error: 'Remote link creation failed but ticket was created' };
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error('Error creating remote link:', error);
     return { success: false, error: error.message };
   }
 }
@@ -279,6 +318,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         request.summary,
         request.description,
         request.sourceTicketUrl,
+        request.issueType,
         config.destEmail,
         config.destApiToken
       );
@@ -288,13 +328,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return;
       }
 
-      // Try to create issue link (optional)
+      // Try to create issue link on destination Jira (optional)
       await createIssueLink(
         config.destJiraUrl,
         request.sourceTicketKey,
         createResult.ticket.key,
         config.destEmail,
         config.destApiToken
+      );
+
+      // Try to create remote link on source Jira (optional)
+      await createRemoteLink(
+        config.sourceJiraUrl,
+        request.sourceTicketKey,
+        createResult.ticket.url,
+        createResult.ticket.key,
+        config.sourceEmail,
+        config.sourceApiToken
       );
 
       sendResponse(createResult);
