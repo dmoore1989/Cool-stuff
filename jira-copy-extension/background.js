@@ -211,9 +211,61 @@ async function createTicket(baseUrl, projectKey, summary, description, sourceTic
 }
 
 /**
- * Create remote link between tickets across JIRA instances
- * Note: JIRA's native issue link API only works within the same instance.
- * For cross-instance linking, we must use remote links (web links).
+ * Create issue link between tickets (works if Application Links are configured)
+ */
+async function createIssueLink(baseUrl, sourceTicketKey, destTicketKey, email, apiToken) {
+  console.log('=== Attempting Issue Link (Linked Work Item) ===');
+  console.log('JIRA URL:', baseUrl);
+  console.log('Source ticket key:', sourceTicketKey);
+  console.log('Destination ticket key:', destTicketKey);
+
+  try {
+    const payload = {
+      type: {
+        name: 'Relates'
+      },
+      inwardIssue: {
+        key: sourceTicketKey
+      },
+      outwardIssue: {
+        key: destTicketKey
+      }
+    };
+
+    console.log('Issue link payload:', JSON.stringify(payload, null, 2));
+
+    const url = `${baseUrl}/rest/api/3/issueLink`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': createAuthHeader(email, apiToken),
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    console.log('Issue link response status:', response.status, response.statusText);
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      console.warn('⚠️ Issue link failed:', errorData);
+      console.warn('This likely means Application Links are not configured between JIRA instances');
+      return { success: false, error: `Issue link failed: ${response.status}`, errorData };
+    }
+
+    const responseData = await response.json().catch(() => ({}));
+    console.log('✅ Issue link created successfully (Linked Work Item):', responseData);
+    return { success: true };
+  } catch (error) {
+    console.error('❌ Error creating issue link:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Create remote link (web link) between tickets
+ * This is a fallback when Application Links are not configured
  */
 async function createRemoteLink(baseUrl, sourceTicketKey, destTicketUrl, destTicketKey, email, apiToken) {
   console.log('=== Creating Remote Link ===');
@@ -372,42 +424,86 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       console.log('✅ Ticket created successfully:', createResult.ticket.key);
       console.log('New ticket URL:', createResult.ticket.url);
 
-      // NOTE: We cannot use JIRA's issue link API across instances
-      // (it would fail with "Issue does not exist" error)
-      // Instead, we use remote links (web links) which work cross-instance
+      // Strategy: Try to create proper issue links (Linked Work Items) first
+      // If that fails (no Application Links configured), fall back to remote links (web links)
 
-      // Create remote link on source JIRA pointing to destination ticket
-      console.log('\n--- Creating remote link on source ticket ---');
-      const sourceRemoteLinkResult = await createRemoteLink(
-        config.sourceJiraUrl,
-        request.sourceTicketKey,
-        createResult.ticket.url,
-        createResult.ticket.key,
-        config.sourceEmail,
-        config.sourceApiToken
-      );
-
-      if (sourceRemoteLinkResult.success) {
-        console.log('✅ Remote link created on source ticket');
-      } else {
-        console.warn('⚠️ Remote link creation on source failed (non-fatal):', sourceRemoteLinkResult.error);
-      }
-
-      // Create remote link on destination JIRA pointing back to source ticket
-      console.log('\n--- Creating remote link on destination ticket ---');
-      const destRemoteLinkResult = await createRemoteLink(
+      // Try to create issue link on destination JIRA
+      console.log('\n--- Attempting to create issue link on destination (Linked Work Item) ---');
+      const destIssueLinkResult = await createIssueLink(
         config.destJiraUrl,
-        createResult.ticket.key,
-        request.sourceTicketUrl,
         request.sourceTicketKey,
+        createResult.ticket.key,
         config.destEmail,
         config.destApiToken
       );
 
-      if (destRemoteLinkResult.success) {
-        console.log('✅ Remote link created on destination ticket');
+      if (destIssueLinkResult.success) {
+        console.log('✅ Issue link created on destination - using Linked Work Items');
+
+        // If issue link worked, try on source too
+        console.log('\n--- Attempting to create issue link on source (Linked Work Item) ---');
+        const sourceIssueLinkResult = await createIssueLink(
+          config.sourceJiraUrl,
+          createResult.ticket.key,
+          request.sourceTicketKey,
+          config.sourceEmail,
+          config.sourceApiToken
+        );
+
+        if (sourceIssueLinkResult.success) {
+          console.log('✅ Issue link created on source - using Linked Work Items');
+          console.log('🎉 Success! Both tickets linked via Linked Work Items');
+        } else {
+          console.warn('⚠️ Source issue link failed, falling back to remote link');
+          // Fall back to remote link on source
+          const sourceRemoteLinkResult = await createRemoteLink(
+            config.sourceJiraUrl,
+            request.sourceTicketKey,
+            createResult.ticket.url,
+            createResult.ticket.key,
+            config.sourceEmail,
+            config.sourceApiToken
+          );
+          console.log(sourceRemoteLinkResult.success ? '✅ Remote link created on source' : '❌ Remote link also failed on source');
+        }
       } else {
-        console.warn('⚠️ Remote link creation on destination failed (non-fatal):', destRemoteLinkResult.error);
+        // Issue links don't work, fall back to remote links
+        console.log('⚠️ Issue links not available (Application Links likely not configured)');
+        console.log('Falling back to remote links (web links)...');
+
+        // Create remote link on source JIRA pointing to destination ticket
+        console.log('\n--- Creating remote link on source ticket ---');
+        const sourceRemoteLinkResult = await createRemoteLink(
+          config.sourceJiraUrl,
+          request.sourceTicketKey,
+          createResult.ticket.url,
+          createResult.ticket.key,
+          config.sourceEmail,
+          config.sourceApiToken
+        );
+
+        if (sourceRemoteLinkResult.success) {
+          console.log('✅ Remote link created on source ticket');
+        } else {
+          console.warn('⚠️ Remote link creation on source failed:', sourceRemoteLinkResult.error);
+        }
+
+        // Create remote link on destination JIRA pointing back to source ticket
+        console.log('\n--- Creating remote link on destination ticket ---');
+        const destRemoteLinkResult = await createRemoteLink(
+          config.destJiraUrl,
+          createResult.ticket.key,
+          request.sourceTicketUrl,
+          request.sourceTicketKey,
+          config.destEmail,
+          config.destApiToken
+        );
+
+        if (destRemoteLinkResult.success) {
+          console.log('✅ Remote link created on destination ticket');
+        } else {
+          console.warn('⚠️ Remote link creation on destination failed:', destRemoteLinkResult.error);
+        }
       }
 
       console.log('\n=== Ticket Copy Operation Complete ===');
