@@ -264,6 +264,64 @@ async function createIssueLink(baseUrl, sourceTicketKey, destTicketKey, email, a
 }
 
 /**
+ * Add a comment to a JIRA ticket
+ */
+async function addComment(baseUrl, ticketKey, commentText, email, apiToken) {
+  console.log('=== Adding Comment to Ticket ===');
+  console.log('JIRA URL:', baseUrl);
+  console.log('Ticket key:', ticketKey);
+  console.log('Comment:', commentText);
+
+  try {
+    const payload = {
+      body: {
+        type: 'doc',
+        version: 1,
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              {
+                type: 'text',
+                text: commentText
+              }
+            ]
+          }
+        ]
+      }
+    };
+
+    console.log('Comment payload:', JSON.stringify(payload, null, 2));
+
+    const url = `${baseUrl}/rest/api/3/issue/${ticketKey}/comment`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': createAuthHeader(email, apiToken),
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    console.log('Comment response status:', response.status, response.statusText);
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      console.error('❌ Failed to add comment:', errorData);
+      return { success: false, error: `Comment creation failed: ${response.status} - ${JSON.stringify(errorData)}` };
+    }
+
+    const responseData = await response.json().catch(() => ({}));
+    console.log('✅ Comment added successfully:', responseData);
+    return { success: true };
+  } catch (error) {
+    console.error('❌ Error adding comment:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
  * Create remote link (web link) between tickets
  * This is a fallback when Application Links are not configured
  */
@@ -423,6 +481,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
       console.log('✅ Ticket created successfully:', createResult.ticket.key);
       console.log('New ticket URL:', createResult.ticket.url);
+
+      // Add a comment to the source ticket
+      console.log('\n--- Adding comment to source ticket ---');
+      const commentResult = await addComment(
+        config.sourceJiraUrl,
+        request.sourceTicketKey,
+        "We'll take a look at this",
+        config.sourceEmail,
+        config.sourceApiToken
+      );
+
+      if (commentResult.success) {
+        console.log('✅ Comment added to source ticket');
+      } else {
+        console.warn('⚠️ Failed to add comment to source ticket:', commentResult.error);
+        // Don't fail the whole operation if comment fails
+      }
 
       // Strategy: Try to create proper issue links (Linked Work Items) first
       // If that fails (no Application Links configured), fall back to remote links (web links)
